@@ -150,7 +150,8 @@ class Command(BaseCommand):
         cutoff = timezone.now() - timedelta(minutes=15)
         Source.objects.filter(status=Source.Status.PROCESSING, updated_at__lt=cutoff).update(status=Source.Status.PENDING)
         while True:
-            close_old_connections()
+            if not options["once"]:
+                close_old_connections()
             job = CrawlJob.objects.filter(
                 status__in=[CrawlJob.Status.PENDING, CrawlJob.Status.PROCESSING]
             ).select_related("assistant").order_by("created_at").first()
