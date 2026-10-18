@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
     "lint": "biome lint app",
-    "test": "node --test tests/widget.test.mjs",
+    "test": "node --test tests/widget.test.mjs tests/theme-init.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -2,6 +2,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { api, clearTokens, hasTokens, json, saveTokens } from "@/lib/api";
+import ThemePicker from "./theme-picker";
 
 type Assistant = {
   id: string; public_id: string; name: string; description: string; instructions: string;
@@ -23,6 +24,8 @@ const blankAssistant = {
   is_active: true, widget_enabled: false, widget_color: "#CCFF00",
   retrieval_top_k: 5, similarity_threshold: 0,
 };
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_UPLOAD_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"];
 
 export default function Home() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -49,6 +52,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState("");
+  const [selectedFileName, setSelectedFileName] = useState("");
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(blankAssistant);
 
@@ -170,14 +175,32 @@ export default function Home() {
   }
 
   async function uploadFile(event: FormEvent<HTMLInputElement>) {
-    if (!selected || !event.currentTarget.files?.[0]) return;
-    const form = new FormData(); form.set("file", event.currentTarget.files[0]);
-    setBusy(true); setError("");
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!selected || !file) return;
+    const extension = `.${file.name.split(".").pop()?.toLowerCase()}`;
+    if (!SUPPORTED_UPLOAD_EXTENSIONS.includes(extension)) {
+      setError("Choose a PDF, DOCX, TXT, or Markdown file.");
+      input.value = "";
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError("This file is larger than the 10 MiB limit.");
+      input.value = "";
+      return;
+    }
+    const form = new FormData(); form.set("file", file);
+    setSelectedFileName(file.name);
+    setUploadingFile(file.name);
+    input.value = "";
+    setBusy(true); setError(""); setNotice("");
     try {
       await api(`/assistants/${selected.id}/sources/`, { method: "POST", body: form });
-      event.currentTarget.value = ""; await loadAssistantData(selected); setNotice("File queued for indexing.");
+      await loadAssistantData(selected);
+      setSelectedFileName("");
+      setNotice("File uploaded and queued for indexing.");
     } catch (reason) { setError((reason as Error).message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setUploadingFile(""); }
   }
 
   async function startCrawl(event: FormEvent) {
@@ -263,6 +286,7 @@ export default function Home() {
   if (!authReady) return <div className="boot"><span className="mark">P</span><p>Loading workspace…</p></div>;
   if (!authenticated) return (
     <main className="auth-shell">
+      <div className="auth-theme"><ThemePicker /></div>
       <div className="auth-art">
         <div className="brand"><span className="mark">P</span><span>PERSONAL AI</span></div>
         <div><p className="eyebrow">YOUR KNOWLEDGE, IN CONVERSATION</p><h1>Build an assistant<br />that knows your work.</h1><p className="muted">Grounded answers. Your sources. Your channels.</p></div>
@@ -271,9 +295,9 @@ export default function Home() {
       <form className="auth-card" onSubmit={authenticate}>
         <p className="eyebrow">{authMode === "login" ? "WELCOME BACK" : "GET STARTED"}</p>
         <h2>{authMode === "login" ? "Sign in" : "Create your account"}</h2>
-        <label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
-        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} autoComplete={authMode === "login" ? "current-password" : "new-password"} required /></label>
-        {error && <div className="alert">{error}</div>}
+        <label className="auth-field">Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" placeholder="you@example.com" required /></label>
+        <label className="auth-field">Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} minLength={authMode === "register" ? 10 : undefined} autoComplete={authMode === "login" ? "current-password" : "new-password"} placeholder={authMode === "login" ? "Enter your password" : "At least 10 characters"} required /></label>
+        {error && <div className="alert" role="alert">{error}</div>}
         <button type="submit" className="button primary wide" disabled={busy}>{busy ? "Please wait…" : authMode === "login" ? "Sign in" : "Create account"}</button>
         <p className="auth-switch">{authMode === "login" ? "New here?" : "Already have an account?"} <button type="button" className="text-button" onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setError(""); }}>{authMode === "login" ? "Create an account" : "Sign in"}</button></p>
       </form>
@@ -295,7 +319,7 @@ export default function Home() {
         </div>
       </aside>
       <main className="main">
-        <header className="topbar"><div className="breadcrumbs"><span>Workspace</span>{selected && screen === "assistant" && <><span className="crumb-sep">/</span><button type="button" onClick={() => setScreen("assistants")}>Assistants</button><span className="crumb-sep">/</span><strong>{selected.name}</strong></>}</div><span className="status-pill"><i /> Services configured by administrator</span></header>
+        <header className="topbar"><div className="breadcrumbs"><span>Workspace</span>{selected && screen === "assistant" && <><span className="crumb-sep">/</span><button type="button" onClick={() => setScreen("assistants")}>Assistants</button><span className="crumb-sep">/</span><strong>{selected.name}</strong></>}</div><div className="topbar-actions"><span className="status-pill">Integrations managed by administrator</span><ThemePicker /></div></header>
         <div className="content">
           {error && <div className="alert inline-alert">{error}<button type="button" onClick={() => setError("")}>×</button></div>}
           {notice && <div className="notice inline-alert">{notice}<button type="button" onClick={() => setNotice("")}>×</button></div>}
@@ -331,7 +355,7 @@ export default function Home() {
             {tab === "knowledge" && <div className="stack">
               <div className="panel"><div className="section-title"><div><h2>Add knowledge</h2><p className="muted">Ingestion is processed by the RAG Core worker.</p></div></div>
                 <div className="knowledge-grid"><form className="subpanel" onSubmit={addTextSource}><h3>Text</h3><label className="field">Title<input name="title" required maxLength={255} /></label><label className="field">Content<textarea name="content" rows={5} required maxLength={2000000} /></label><button type="submit" className="button secondary" disabled={busy}>Add text source</button></form>
-                  <div className="subpanel"><h3>Upload a file</h3><p className="muted">PDF, DOCX, TXT, or Markdown · up to 10 MiB</p><label className="button secondary file-button">Choose file<input type="file" accept=".pdf,.docx,.txt,.md" onChange={uploadFile} /></label></div></div>
+                  <div className="subpanel"><h3>Upload a file</h3><p className="muted">PDF, DOCX, TXT, or Markdown · up to 10 MiB</p><label className="button secondary file-button">{uploadingFile ? "Uploading…" : "Choose file"}<input type="file" accept=".pdf,.docx,.txt,.md" disabled={Boolean(uploadingFile)} onChange={uploadFile} /></label>{uploadingFile && <p className="small-note" role="status">Uploading {uploadingFile}…</p>}{selectedFileName && !uploadingFile && <p className="small-note">Selected: {selectedFileName}</p>}</div></div>
               </div>
               <div className="panel"><div className="section-title"><div><h2>Website discovery</h2><p className="muted">Discovery obeys robots.txt and limits requests to public, same-origin web pages.</p></div></div>
                 <form className="crawl-form" onSubmit={startCrawl}><label className="field grow">Website URL<input type="url" placeholder="https://example.com" value={crawlUrl} onChange={(event) => setCrawlUrl(event.target.value)} required /></label><label className="field">Mode<select value={crawlMode} onChange={(event) => setCrawlMode(event.target.value as "manual" | "automatic")}><option value="manual">Select pages manually</option><option value="automatic">Automatic (within configured limit)</option></select></label><button type="submit" className="button primary" disabled={busy}>Discover pages</button></form>

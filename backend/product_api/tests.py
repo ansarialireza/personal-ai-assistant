@@ -1,12 +1,15 @@
 import socket
 import uuid
 import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 
 import httpx
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.response import Response
 from rest_framework.test import APIClient
@@ -134,6 +137,22 @@ class ProductFlowTests(TestCase):
         source = Source.objects.get(pk=response.data["id"])
         self.assertEqual(source.status, Source.Status.INDEXED)
         self.assertEqual(source.remote_document_id, 72)
+
+    def test_file_upload_is_persisted_and_queued_without_ingesting(self):
+        content = b"Synthetic upload verification document."
+        with TemporaryDirectory() as media_root, override_settings(MEDIA_ROOT=media_root):
+            with patch.object(RagCoreClient, "upload") as rag_upload:
+                response = self.client.post(
+                    f"/api/v1/assistants/{self.assistant.pk}/sources/",
+                    {"file": SimpleUploadedFile("verification.txt", content, content_type="text/plain")},
+                    format="multipart",
+                )
+
+            self.assertEqual(response.status_code, 202, response.data)
+            source = Source.objects.get(pk=response.data["id"])
+            self.assertEqual(source.status, Source.Status.PENDING)
+            self.assertEqual(Path(source.file_path).read_bytes(), content)
+            rag_upload.assert_not_called()
 
     def test_failed_ingestion_retry_reuses_saved_extraction(self):
         source = Source.objects.create(
