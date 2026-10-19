@@ -45,6 +45,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Sync .env from GitHub Secret
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          command_timeout: 5m
+          script: |
+            set -e
+            echo "${{ secrets.ENV_FILE_B64 }}" | base64 -d > /opt/rag-platform/products/personal-ai-assistant/.env.tmp
+            mv /opt/rag-platform/products/personal-ai-assistant/.env.tmp /opt/rag-platform/products/personal-ai-assistant/.env
+            chmod 600 /opt/rag-platform/products/personal-ai-assistant/.env
+            echo "env synced: $(wc -l < /opt/rag-platform/products/personal-ai-assistant/.env) lines"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
