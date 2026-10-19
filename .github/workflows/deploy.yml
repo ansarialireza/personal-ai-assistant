@@ -1,0 +1,57 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-personal-ai-assistant
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write CI .env
+        run: |
+          cat > .env <<'ENVEOF'
+          DJANGO_SECRET_KEY=ci-only-not-a-secret
+          DEBUG=True
+          ALLOWED_HOSTS=localhost,127.0.0.1,api,backend
+          DATABASE_URL=sqlite:///ci.sqlite3
+          POSTGRES_PASSWORD=ci-placeholder
+          POSTGRES_DB=ci
+          POSTGRES_USER=ci
+          ENVEOF
+
+      - name: Build backend
+        run: docker compose build backend
+
+      - name: Django check
+        run: docker compose run --rm --no-deps -e DATABASE_URL=sqlite:///ci.sqlite3 backend python manage.py check
+
+      - name: Tests
+        run: docker compose run --rm --no-deps -e DATABASE_URL=sqlite:///ci.sqlite3 backend python manage.py test product_api
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            /opt/rag-platform/infra/scripts/deploy.sh product
